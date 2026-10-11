@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "photon-cli": {
+      "source": "photon-hq/skills",
+      "sourceType": "github",
+      "skillPath": "skills/photon-cli/SKILL.md",
+      "computedHash": "cd3aa827890a716bec483664c24bb6af733be88f860edd395ac453c1e1802182"
+    },
     "spectrum": {
       "source": "photon-hq/skills",
       "sourceType": "github",
