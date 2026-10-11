@@ -119,11 +119,9 @@ async function deliver(space: Space, message: Message, outcome: Outcome, spoken:
     if (spoken && speech.enabled) {
       try {
         const audio = await speech.speak(outcome.reply);
-        await replyTo(
-          space,
-          message,
-          voice(audio.data, { name: audio.name, mimeType: audio.mimeType, duration: audio.duration }),
-        );
+        // Sent as a plain message: Photon rejects audio messages that are
+        // threaded replies (FAILED_PRECONDITION "is_audio_message with reply_to").
+        await space.send(voice(audio.data, { name: audio.name, mimeType: audio.mimeType, duration: audio.duration }));
         sentAsVoice = true;
       } catch (err) {
         console.error("[pocket] text-to-speech failed, replying in text:", err);
