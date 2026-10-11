@@ -94,8 +94,26 @@ async function replyTo(space: Space, message: Message, content: ContentInput): P
   if (!sent) await space.send(content);
 }
 
+/**
+ * Tapback, and if it can't be delivered, the same emoji as a text so the user
+ * still sees the confirmation (a 👍 always means the note was saved).
+ */
+async function tapback(space: Space, message: Message, emoji: string): Promise<void> {
+  try {
+    const sent = await message.react(emoji);
+    if (sent) {
+      console.log(`[pocket] tapback ${emoji} sent`);
+      return;
+    }
+    console.warn(`[pocket] tapback ${emoji} was not delivered by the provider; sending it as text`);
+  } catch (err) {
+    console.error(`[pocket] tapback ${emoji} failed; sending it as text:`, err);
+  }
+  await space.send(emoji);
+}
+
 async function deliver(space: Space, message: Message, outcome: Outcome, spoken: boolean): Promise<void> {
-  if (outcome.react) await message.react(outcome.react);
+  if (outcome.react) await tapback(space, message, outcome.react);
   if (outcome.reply) {
     let sentAsVoice = false;
     if (spoken && speech.enabled) {
@@ -122,6 +140,10 @@ async function deliver(space: Space, message: Message, outcome: Outcome, spoken:
   }
 }
 
+function secondsSince(start: number): string {
+  return `${((Date.now() - start) / 1000).toFixed(1)}s`;
+}
+
 async function handle(
   space: Space,
   message: Message,
@@ -131,11 +153,13 @@ async function handle(
   const content = message.content;
   switch (content.type) {
     case "text": {
+      const started = Date.now();
       await space.responding(async () => {
         const outcome = await pocket.handleText(sender, content.text);
-        console.log(`[pocket] ${sender}: text -> ${outcome.intent ?? "?"}`);
+        console.log(`[pocket] ${sender}: text -> ${outcome.intent ?? "?"} (${secondsSince(started)} to decide)`);
         await deliver(space, message, outcome, false);
       });
+      console.log(`[pocket] ${sender}: done in ${secondsSince(started)}`);
       return;
     }
     case "voice": {
