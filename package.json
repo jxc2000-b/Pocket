@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
     "@photon-ai/advanced-imessage": "^2.2.0",
     "@spectrum-ts/imessage": "^12.10.1",
     "spectrum-ts": "^12.10.1"
@@ -15,6 +18,7 @@
   "devDependencies": {
     "@types/node": "^22",
     "tsx": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^5.0.3"
   }
 }
