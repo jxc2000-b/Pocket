@@ -8,6 +8,12 @@ importers:
 
   .:
     dependencies:
+      '@photon-ai/advanced-imessage':
+        specifier: ^2.2.0
+        version: 2.2.0(@grpc/grpc-js@1.14.6)(nice-grpc-common@2.0.4)(nice-grpc@2.1.17)
+      '@spectrum-ts/imessage':
+        specifier: ^12.10.1
+        version: 12.10.1(@spectrum-ts/core@12.10.1(typescript@5.9.3))(typescript@5.9.3)
       spectrum-ts:
         specifier: ^12.10.1
         version: 12.10.1(typescript@5.9.3)

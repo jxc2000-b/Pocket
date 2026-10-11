@@ -8,11 +8,13 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
+    "@photon-ai/advanced-imessage": "^2.2.0",
+    "@spectrum-ts/imessage": "^12.10.1",
     "spectrum-ts": "^12.10.1"
   },
   "devDependencies": {
-    "typescript": "^5",
     "@types/node": "^22",
-    "tsx": "^4"
+    "tsx": "^4",
+    "typescript": "^5"
   }
 }
