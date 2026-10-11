@@ -135,6 +135,16 @@ describe("save / recall / update / history / forget / unknown", () => {
     expect(out.reply).toBe(SAVE_FAILED);
   });
 
+  it("answers general-knowledge questions without saving anything", async () => {
+    const llm = mockLlm(decision({ intent: "general", answer: "Canberra." }));
+    const { pocket } = makePocket(llm);
+    const out = await pocket.handleText(SENDER, "What's the capital of Australia?");
+    expect(out.reply).toBe("Canberra.");
+    expect(out.react).toBeUndefined();
+    expect(existsSync(join(root, SENDER))).toBe(false);
+    expect(llm.calls[0]!.system).toContain("- general:");
+  });
+
   it("does not call Claude or 👍 when the vault cannot be read", async () => {
     await writeFile(join(root, SENDER), "not a folder");
     const claude = mockLlm(decision({ intent: "save", title: "Spare keys", now: "closet" }));
