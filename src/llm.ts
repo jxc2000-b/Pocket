@@ -3,7 +3,7 @@
 // both implement it; config picks which one runs.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { FinishReason, GoogleGenAI } from "@google/genai";
+import { FinishReason, GoogleGenAI, ThinkingLevel } from "@google/genai";
 
 export interface JsonRequest {
   system?: string;
@@ -85,13 +85,24 @@ export function geminiGenerateJson(
   const opts = { ...DEFAULT_RETRY, ...retry };
   const chain = (Array.isArray(models) ? models : [models]).filter((m, i, all) => m && all.indexOf(m) === i);
   const once = geminiOnce(new GoogleGenAI({ apiKey }));
+  // Models that rejected a thinking level; they are called without one after.
+  const noThinking = new Set<string>();
   return async (req) => {
     let lastErr: unknown;
     for (const model of chain) {
       for (let attempt = 0; attempt < opts.attempts; attempt++) {
         try {
-          return await once(model, req);
+          const started = Date.now();
+          const result = await once(model, req, !noThinking.has(model));
+          console.log(`[pocket] ${model} answered in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+          return result;
         } catch (err) {
+          if (!noThinking.has(model) && isThinkingRejected(err)) {
+            console.warn(`[pocket] ${model} does not accept a thinking level; retrying without it`);
+            noThinking.add(model);
+            attempt--;
+            continue;
+          }
           if (!isRetryable(err)) throw err;
           lastErr = err;
           const status = (err as { status: number }).status;
@@ -104,8 +115,23 @@ export function geminiGenerateJson(
   };
 }
 
-function geminiOnce(ai: GoogleGenAI): (model: string, req: JsonRequest) => Promise<JsonResult> {
-  return async (model, req) => {
+/**
+ * Pocket's calls are short classifications, so keep model thinking light: it
+ * is most of the latency. Older models only take a token budget and reject a
+ * level, which isThinkingRejected detects.
+ */
+const THINKING_BY_EFFORT: Record<JsonRequest["effort"], ThinkingLevel> = {
+  low: ThinkingLevel.MINIMAL,
+  medium: ThinkingLevel.LOW,
+};
+
+function isThinkingRejected(err: unknown): boolean {
+  const e = err as { status?: unknown; message?: unknown } | null;
+  return e?.status === 400 && typeof e.message === "string" && /thinking/i.test(e.message);
+}
+
+function geminiOnce(ai: GoogleGenAI): (model: string, req: JsonRequest, thinking: boolean) => Promise<JsonResult> {
+  return async (model, req, thinking) => {
     const parts: Array<Record<string, unknown>> = [];
     if (req.image) parts.push({ inlineData: { mimeType: req.image.mimeType, data: req.image.data.toString("base64") } });
     parts.push({ text: req.text });
@@ -117,6 +143,7 @@ function geminiOnce(ai: GoogleGenAI): (model: string, req: JsonRequest) => Promi
         responseMimeType: "application/json",
         responseJsonSchema: req.schema,
         maxOutputTokens: req.maxTokens,
+        ...(thinking ? { thinkingConfig: { thinkingLevel: THINKING_BY_EFFORT[req.effort] } } : {}),
       },
     });
     const finish = response.candidates?.[0]?.finishReason;

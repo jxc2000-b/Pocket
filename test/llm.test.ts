@@ -68,6 +68,7 @@ describe("geminiGenerateJson (network stubbed)", () => {
       expect(sent!.body.contents[0].parts[1].text).toBe("what is this?");
       expect(sent!.body.generationConfig.responseMimeType).toBe("application/json");
       expect(sent!.body.generationConfig.responseJsonSchema).toEqual(schema);
+      expect(sent!.body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "MINIMAL" });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -134,6 +135,31 @@ describe("geminiGenerateJson retries", () => {
     expect(r.result).toEqual({ refused: false, value: { a: 1 } });
     expect(r.urls.slice(0, 3).every((u) => u.includes("models/main:"))).toBe(true);
     expect(r.urls[3]).toContain("models/lite:");
+  });
+
+  it("drops the thinking level when a model rejects it, without spending a retry", async () => {
+    const { geminiGenerateJson } = await import("../src/llm.ts");
+    const { vi } = await import("vitest");
+    const bodies: any[] = [];
+    vi.stubGlobal("fetch", async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      bodies.push(body);
+      if (body.generationConfig.thinkingConfig) {
+        return new Response(
+          JSON.stringify({ error: { code: 400, message: "Thinking level is not supported for this model.", status: "INVALID_ARGUMENT" } }),
+          { status: 400, headers: { "content-type": "application/json" } },
+        );
+      }
+      return ok();
+    });
+    try {
+      const generate = geminiGenerateJson("k", ["old"], { attempts: 1, sleep: async () => {} });
+      expect(await generate({ ...req, effort: "medium" })).toEqual({ refused: false, value: { a: 1 } });
+      expect(await generate(req)).toEqual({ refused: false, value: { a: 1 } });
+      expect(bodies.map((b) => Boolean(b.generationConfig.thinkingConfig))).toEqual([true, false, false]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("does not retry a non-transient error", async () => {
