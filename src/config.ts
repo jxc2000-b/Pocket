@@ -12,7 +12,7 @@ export interface Config {
   /** Absolute path to the Obsidian vault folder Pocket writes into. */
   vaultPath: string;
   llm:
-    | { provider: "gemini"; apiKey: string; model: string }
+    | { provider: "gemini"; apiKey: string; model: string; fallbackModel: string }
     | { provider: "claude"; model: string };
   /** IANA timezone used to resolve "Tuesday at 3pm" and to format dates. */
   timeZone: string;
@@ -52,6 +52,8 @@ export function parseShortcutAllowlist(raw: string | undefined): string[] {
 }
 
 export const DEFAULT_GEMINI_MODEL = "gemini-flash-latest";
+/** Tried when the main Gemini model stays overloaded. */
+export const DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-flash-lite-latest";
 export const DEFAULT_CLAUDE_MODEL = "claude-opus-5-5";
 
 /**
@@ -69,6 +71,7 @@ export function loadLlm(env: NodeJS.ProcessEnv): Config["llm"] {
       provider,
       apiKey: required(env, "GEMINI_API_KEY"),
       model: env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL,
+      fallbackModel: env.GEMINI_FALLBACK_MODEL?.trim() || DEFAULT_GEMINI_FALLBACK_MODEL,
     };
   }
   if (!env.ANTHROPIC_API_KEY?.trim()) {

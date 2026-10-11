@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_CLAUDE_MODEL, DEFAULT_GEMINI_MODEL, loadLlm } from "../src/config.ts";
+import { DEFAULT_CLAUDE_MODEL, DEFAULT_GEMINI_FALLBACK_MODEL, DEFAULT_GEMINI_MODEL, loadLlm } from "../src/config.ts";
 import { parseJsonText } from "../src/llm.ts";
 
 describe("parseJsonText", () => {
@@ -13,7 +13,12 @@ describe("parseJsonText", () => {
 
 describe("loadLlm", () => {
   it("uses Gemini when GEMINI_API_KEY is set", () => {
-    expect(loadLlm({ GEMINI_API_KEY: "g" })).toEqual({ provider: "gemini", apiKey: "g", model: DEFAULT_GEMINI_MODEL });
+    expect(loadLlm({ GEMINI_API_KEY: "g" })).toEqual({
+      provider: "gemini",
+      apiKey: "g",
+      model: DEFAULT_GEMINI_MODEL,
+      fallbackModel: DEFAULT_GEMINI_FALLBACK_MODEL,
+    });
     expect(loadLlm({ GEMINI_API_KEY: "g", GEMINI_MODEL: "gemini-x", ANTHROPIC_API_KEY: "a" })).toMatchObject({
       provider: "gemini",
       model: "gemini-x",
@@ -83,5 +88,63 @@ describe("geminiGenerateJson (network stubbed)", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("geminiGenerateJson retries", () => {
+  const ok = () =>
+    new Response(JSON.stringify({ candidates: [{ content: { role: "model", parts: [{ text: '{"a":1}' }] }, finishReason: "STOP" }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  const fail = (status: number) =>
+    new Response(JSON.stringify({ error: { code: status, message: "busy", status: "UNAVAILABLE" } }), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  const req = { text: "x", schema: {}, effort: "low" as const, maxTokens: 10 };
+
+  async function run(statuses: number[], models: string[]) {
+    const { geminiGenerateJson } = await import("../src/llm.ts");
+    const { vi } = await import("vitest");
+    const urls: string[] = [];
+    const sleeps: number[] = [];
+    vi.stubGlobal("fetch", async (url: string | URL | Request) => {
+      urls.push(String(url));
+      const s = statuses.shift();
+      return s === undefined || s === 200 ? ok() : fail(s);
+    });
+    try {
+      const generate = geminiGenerateJson("k", models, { attempts: 3, baseDelayMs: 10, sleep: async (ms) => void sleeps.push(ms) });
+      return { result: await generate(req).catch((e: unknown) => e), urls, sleeps };
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }
+
+  it("retries a 503 with backoff and succeeds", async () => {
+    const r = await run([503, 503, 200], ["main"]);
+    expect(r.result).toEqual({ refused: false, value: { a: 1 } });
+    expect(r.urls).toHaveLength(3);
+    expect(r.sleeps).toEqual([10, 20]);
+  });
+
+  it("falls back to the next model when the first stays overloaded", async () => {
+    const r = await run([503, 503, 503, 200], ["main", "lite"]);
+    expect(r.result).toEqual({ refused: false, value: { a: 1 } });
+    expect(r.urls.slice(0, 3).every((u) => u.includes("models/main:"))).toBe(true);
+    expect(r.urls[3]).toContain("models/lite:");
+  });
+
+  it("does not retry a non-transient error", async () => {
+    const r = await run([400], ["main", "lite"]);
+    expect((r.result as { status: number }).status).toBe(400);
+    expect(r.urls).toHaveLength(1);
+  });
+
+  it("gives up with the last error when every model is overloaded", async () => {
+    const r = await run([503, 503, 503, 503, 503, 503], ["main", "lite"]);
+    expect((r.result as { status: number }).status).toBe(503);
+    expect(r.urls).toHaveLength(6);
   });
 });
