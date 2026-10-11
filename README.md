@@ -1,4 +1,7 @@
-# Pocket Memory
+# Pocket 
+
+![Pocket Logo](./pocket_vertical.png)
+
 
 > Text it now. Find it when you need it. Or just say it.
 
@@ -27,6 +30,7 @@ iPhone ──iMessage──▶ Spectrum Cloud ──▶ pnpm start (your Mac)
                                           ├─ ElevenLabs: Scribe STT / TTS (+ afconvert → m4a)
                                           └─ shortcuts run "<allowlisted name>"
 ```
+![Pocket Feature Sheet](./pocket_features.png)
 
 ## Requirements
 
