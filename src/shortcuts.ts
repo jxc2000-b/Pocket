@@ -4,7 +4,7 @@
 // started with execFile (no shell), so user text can only ever reach a
 // Shortcut as its input file.
 
-import { execFile as execFileCb } from "node:child_process";
+import { execFileAsync, type ExecFileFn } from "./exec.ts";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,6 +48,8 @@ export const SHORTCUTS: Record<ShortcutAction, ShortcutSpec> = {
   },
 };
 
+export type { ExecFileFn };
+
 export const DEFAULT_SHORTCUT_NAMES: readonly string[] = Object.values(SHORTCUTS).map((s) => s.name);
 
 export interface ShortcutRequest {
@@ -62,20 +64,6 @@ export interface ShortcutRequest {
   minutes: number;
 }
 
-export type ExecFileFn = (
-  file: string,
-  args: string[],
-  options: { timeout: number },
-) => Promise<{ stdout: string; stderr: string }>;
-
-const defaultExecFile: ExecFileFn = (file, args, options) =>
-  new Promise((resolve, reject) => {
-    execFileCb(file, args, { ...options, encoding: "utf8" }, (err, stdout, stderr) => {
-      if (err) reject(Object.assign(err, { stdout, stderr }));
-      else resolve({ stdout, stderr });
-    });
-  });
-
 export class ShortcutNotAllowedError extends Error {}
 
 export function isShortcutAction(value: string): value is ShortcutAction {
@@ -87,7 +75,7 @@ export class ShortcutRunner {
 
   constructor(
     allowlist: readonly string[],
-    private readonly execFile: ExecFileFn = defaultExecFile,
+    private readonly execFile: ExecFileFn = execFileAsync,
   ) {
     this.allow = new Set(allowlist);
   }

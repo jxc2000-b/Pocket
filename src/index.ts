@@ -3,13 +3,14 @@
 // on the user's Mac, where the Obsidian vault and `shortcuts` live.
 // Docs: https://photon.codes/docs/spectrum-ts
 
-import { Spectrum, type Message, type Space } from "spectrum-ts";
+import { Spectrum, voice, type ContentInput, type Message, type Space } from "spectrum-ts";
 import { effect, imessage } from "spectrum-ts/providers/imessage";
 import { Brain } from "./brain.ts";
 import { loadConfig } from "./config.ts";
 import { Pocket, type Outcome } from "./pocket.ts";
 import { ShortcutRunner } from "./shortcuts.ts";
 import { Vault } from "./vault.ts";
+import { Voice } from "./voice.ts";
 
 // Load ./.env into process.env (values already set in the environment win).
 try {
@@ -22,6 +23,7 @@ const config = loadConfig();
 const vault = new Vault(config.vaultPath, config.timeZone);
 const shortcuts = new ShortcutRunner(config.shortcutAllowlist);
 const pocket = new Pocket(vault, new Brain(), shortcuts, config.timeZone);
+const speech = new Voice(config.elevenLabs);
 
 const app = await Spectrum({
   projectId: config.projectId,
@@ -30,6 +32,7 @@ const app = await Spectrum({
 });
 
 console.log(`[pocket] running. Vault: ${config.vaultPath}`);
+if (!speech.enabled) console.warn("[pocket] ELEVENLABS_API_KEY not set: voice notes are disabled.");
 console.log(`[pocket] Shortcuts enabled: ${shortcuts.enabledActions().join(", ") || "none"}`);
 
 // One message at a time per sender, so notes are never written concurrently
@@ -52,9 +55,31 @@ function isDirectChat(space: Space, message: Message): boolean {
   return imessage(space).type === "dm";
 }
 
-async function deliver(space: Space, message: Message, outcome: Outcome): Promise<void> {
+/** Threaded reply; if the provider skips it, send into the chat instead. */
+async function replyTo(space: Space, message: Message, content: ContentInput): Promise<void> {
+  const sent = await message.reply(content);
+  if (!sent) await space.send(content);
+}
+
+async function deliver(space: Space, message: Message, outcome: Outcome, spoken: boolean): Promise<void> {
   if (outcome.react) await message.react(outcome.react);
-  if (outcome.reply) await message.reply(outcome.reply);
+  if (outcome.reply) {
+    let sentAsVoice = false;
+    if (spoken && speech.enabled) {
+      try {
+        const audio = await speech.speak(outcome.reply);
+        await replyTo(
+          space,
+          message,
+          voice(audio.data, { name: audio.name, mimeType: audio.mimeType, duration: audio.duration }),
+        );
+        sentAsVoice = true;
+      } catch (err) {
+        console.error("[pocket] text-to-speech failed, replying in text:", err);
+      }
+    }
+    if (!sentAsVoice) await replyTo(space, message, outcome.reply);
+  }
   for (const notice of outcome.notices) await space.send(notice);
   if (outcome.milestone) {
     await space.send(
@@ -69,8 +94,33 @@ async function handle(space: Space, message: Message, sender: string): Promise<v
     case "text": {
       await space.responding(async () => {
         const outcome = await pocket.handleText(sender, content.text);
-        console.log(`[pocket] ${sender}: ${outcome.intent ?? "?"}`);
-        await deliver(space, message, outcome);
+        console.log(`[pocket] ${sender}: text -> ${outcome.intent ?? "?"}`);
+        await deliver(space, message, outcome, false);
+      });
+      return;
+    }
+    case "voice": {
+      await space.responding(async () => {
+        if (!speech.enabled) {
+          await replyTo(space, message, "Voice notes aren't set up yet. Please text me instead.");
+          return;
+        }
+        let transcript: string;
+        try {
+          transcript = await speech.transcribe(await content.read(), content.mimeType, content.name);
+        } catch (err) {
+          console.error("[pocket] transcription failed:", err);
+          await replyTo(space, message, "Sorry, I couldn't transcribe that voice note. Nothing was saved.");
+          return;
+        }
+        if (!transcript) {
+          await message.react("❓");
+          await replyTo(space, message, "I couldn't make out that voice note.");
+          return;
+        }
+        const outcome = await pocket.handleText(sender, transcript);
+        console.log(`[pocket] ${sender}: voice -> ${outcome.intent ?? "?"}`);
+        await deliver(space, message, outcome, true);
       });
       return;
     }
