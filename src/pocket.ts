@@ -7,8 +7,9 @@
 
 import { Brain, type Decision } from "./brain.ts";
 import { formatShortDate } from "./dates.ts";
+import { PhotoError, type PhotoDescription, type Photos, type PreparedImage } from "./photos.ts";
 import { SHORTCUTS, ShortcutRunner, confirmationFor } from "./shortcuts.ts";
-import { isImageFile, type Memory, type Vault } from "./vault.ts";
+import { isImageFile, sanitizeFileName as sanitizeId, type Memory, type Vault } from "./vault.ts";
 
 export const NOT_FOUND = "You haven't told me that yet.";
 export const SAVE_FAILED = "Sorry, I couldn't save that. Nothing was saved, please try again.";
@@ -47,7 +48,50 @@ export class Pocket {
     readonly shortcuts: ShortcutRunner,
     readonly timeZone: string,
     private readonly clock: () => Date = () => new Date(),
+    readonly photos?: Photos,
   ) {}
+
+  /** Save a photo memory: store the image in the vault, describe it, embed it in a note. */
+  async handlePhoto(sender: string, data: Buffer, mimeType: string, caption = ""): Promise<Outcome> {
+    const out: Outcome = { notices: [], attachments: [], intent: "save" };
+    if (!this.photos) {
+      out.reply = "I can't save photos yet. Please describe it in a text instead.";
+      return out;
+    }
+    let description: PhotoDescription;
+    let prepared: PreparedImage;
+    try {
+      prepared = await this.photos.prepare(data, mimeType);
+      description = await this.photos.describe(prepared, caption.trim());
+    } catch (err) {
+      console.error("[pocket] photo processing failed:", err);
+      out.reply =
+        err instanceof PhotoError
+          ? "Sorry, I can't read that photo. Nothing was saved."
+          : "Sorry, I couldn't process that photo right now. Nothing was saved.";
+      return out;
+    }
+    try {
+      const count = (await this.vault.list(sender)).length;
+      const file = await this.vault.saveAttachment(sender, prepared.stored, description.title, prepared.storedExt);
+      const original = caption.trim() ? `${caption.trim()} (photo)` : `Photo: ${description.now}`;
+      const before = await this.vault.get(sender, sanitizeId(description.title));
+      await this.vault.save(sender, {
+        title: description.title,
+        now: description.now,
+        original,
+        entities: description.entities,
+        embed: file.vaultPath,
+      });
+      if (!before && count + 1 === MILESTONE) out.milestone = MILESTONE;
+    } catch (err) {
+      console.error("[pocket] vault write failed:", err);
+      out.reply = SAVE_FAILED;
+      return out;
+    }
+    out.react = "👍";
+    return out;
+  }
 
   async handleText(sender: string, text: string): Promise<Outcome> {
     const out: Outcome = { notices: [], attachments: [] };
@@ -94,8 +138,9 @@ export class Pocket {
             await this.vault.update(sender, target.id, { now, original: message, entities: d.entities });
           } else {
             const title = d.title || d.target_note || fallbackTitle(message);
+            const isNew = !findNote(sanitizeId(title));
             await this.vault.save(sender, { title, now, original: message, entities: d.entities });
-            if (memories.length + 1 === MILESTONE) out.milestone = MILESTONE;
+            if (isNew && memories.length + 1 === MILESTONE) out.milestone = MILESTONE;
           }
         } catch (err) {
           console.error("[pocket] vault write failed:", err);

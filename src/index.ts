@@ -3,10 +3,11 @@
 // on the user's Mac, where the Obsidian vault and `shortcuts` live.
 // Docs: https://photon.codes/docs/spectrum-ts
 
-import { Spectrum, voice, type ContentInput, type Message, type Space } from "spectrum-ts";
+import { Spectrum, attachment, voice, type ContentInput, type Message, type Space } from "spectrum-ts";
 import { effect, imessage } from "spectrum-ts/providers/imessage";
 import { Brain } from "./brain.ts";
 import { loadConfig } from "./config.ts";
+import { Photos, isImageMime } from "./photos.ts";
 import { Pocket, type Outcome } from "./pocket.ts";
 import { ShortcutRunner } from "./shortcuts.ts";
 import { Vault } from "./vault.ts";
@@ -22,7 +23,8 @@ try {
 const config = loadConfig();
 const vault = new Vault(config.vaultPath, config.timeZone);
 const shortcuts = new ShortcutRunner(config.shortcutAllowlist);
-const pocket = new Pocket(vault, new Brain(), shortcuts, config.timeZone);
+const brain = new Brain();
+const pocket = new Pocket(vault, brain, shortcuts, config.timeZone, undefined, new Photos(brain.createMessage));
 const speech = new Voice(config.elevenLabs);
 
 const app = await Spectrum({
@@ -47,6 +49,32 @@ function enqueue(sender: string, job: () => Promise<void>): void {
       if (queues.get(sender) === next) queues.delete(sender);
     });
   queues.set(sender, next);
+}
+
+// Photo captions usually arrive as a separate text right after the image.
+// When an image comes in, wait briefly for a short, non-question text from the
+// same sender and use it as the caption instead of handling it separately.
+const CAPTION_WAIT_MS = 5_000;
+const captionWaiters = new Map<string, (text: string) => void>();
+
+function expectCaption(sender: string): Promise<string> {
+  return new Promise<string>((resolve) => {
+    const settle = (text: string) => {
+      clearTimeout(timer);
+      if (captionWaiters.get(sender) === settle) captionWaiters.delete(sender);
+      resolve(text);
+    };
+    const timer = setTimeout(() => settle(""), CAPTION_WAIT_MS);
+    captionWaiters.get(sender)?.(""); // an earlier photo stops waiting
+    captionWaiters.set(sender, settle);
+  });
+}
+
+function offerCaption(sender: string, text: string): boolean {
+  const settle = captionWaiters.get(sender);
+  if (!settle || text.length > 200 || text.trim().endsWith("?")) return false;
+  settle(text);
+  return true;
 }
 
 /** One-on-one chats only (group chats need the Business plan). */
@@ -80,6 +108,7 @@ async function deliver(space: Space, message: Message, outcome: Outcome, spoken:
     }
     if (!sentAsVoice) await replyTo(space, message, outcome.reply);
   }
+  for (const path of outcome.attachments) await space.send(attachment(path));
   for (const notice of outcome.notices) await space.send(notice);
   if (outcome.milestone) {
     await space.send(
@@ -88,7 +117,12 @@ async function deliver(space: Space, message: Message, outcome: Outcome, spoken:
   }
 }
 
-async function handle(space: Space, message: Message, sender: string): Promise<void> {
+async function handle(
+  space: Space,
+  message: Message,
+  sender: string,
+  captionPromise?: Promise<string>,
+): Promise<void> {
   const content = message.content;
   switch (content.type) {
     case "text": {
@@ -124,6 +158,36 @@ async function handle(space: Space, message: Message, sender: string): Promise<v
       });
       return;
     }
+    case "attachment": {
+      if (!isImageMime(content.mimeType)) return;
+      const caption = captionPromise ? await captionPromise : "";
+      await space.responding(async () => {
+        const outcome = await pocket.handlePhoto(sender, await content.read(), content.mimeType, caption);
+        console.log(`[pocket] ${sender}: photo -> ${outcome.react ? "saved" : "not saved"}`);
+        await deliver(space, message, outcome, false);
+      });
+      return;
+    }
+    case "group": {
+      // A photo sent together with its caption may arrive as one group.
+      const items = content.items.map((m) => m.content);
+      const image = items.find((c) => c.type === "attachment" && isImageMime(c.mimeType));
+      const caption = items
+        .flatMap((c) => (c.type === "text" ? [c.text] : []))
+        .join(" ")
+        .trim();
+      if (image?.type === "attachment") {
+        await space.responding(async () => {
+          const outcome = await pocket.handlePhoto(sender, await image.read(), image.mimeType, caption);
+          await deliver(space, message, outcome, false);
+        });
+      } else if (caption) {
+        await space.responding(async () => {
+          await deliver(space, message, await pocket.handleText(sender, caption), false);
+        });
+      }
+      return;
+    }
     default:
       return; // reactions, typing, read receipts, etc.
   }
@@ -134,5 +198,9 @@ for await (const [space, message] of app.messages) {
   const sender = message.sender?.id;
   if (!sender) continue;
   if (!isDirectChat(space, message)) continue;
-  enqueue(sender, () => handle(space, message, sender));
+  const content = message.content;
+  let caption: Promise<string> | undefined;
+  if (content.type === "attachment" && isImageMime(content.mimeType)) caption = expectCaption(sender);
+  else if (content.type === "text" && offerCaption(sender, content.text)) continue;
+  enqueue(sender, () => handle(space, message, sender, caption));
 }

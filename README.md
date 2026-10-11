@@ -12,6 +12,7 @@ Pocket Memory is an iMessage contact you text, or send a voice note to, whenever
 - **Unknown:** "What's my passport number?" → "You haven't told me that yet."
 - **Voice:** send a voice note to save or ask; questions asked by voice get a voice answer (ElevenLabs)
 - **Shortcuts:** "Dentist Tuesday 3pm" saves the memory and adds a Calendar event
+- **Photos:** send a photo (optionally with a caption) to save it; "Which bin has my tent?" answers and sends the photo back
 
 The full product spec is in [`POCKET_MEMORY.md`](./POCKET_MEMORY.md).
 
@@ -122,7 +123,7 @@ This user-side Shortcut lets you share any text, link or photo from any app into
    - Add **Send Message**: Message = the Text from the previous step (or *Shortcut Input* directly for photos), Recipients = your **Pocket** contact.
 4. Turn off **Show When Run** on the Send Message action so it sends in one tap.
 
-Now Share → **Send to Pocket** from Safari, Photos, Notes or any app saves it.
+Now Share → **Send to Pocket** from Safari, Photos, Notes or any app saves it. Photos shared this way become photo memories.
 
 ## The vault
 
@@ -141,6 +142,7 @@ Each sender gets a folder (named after their phone number or email). Each thing,
 - People and named things become `[[wikilinks]]` (with a stub note), so Obsidian's graph view clusters related memories. Open the graph view next to iMessage for the demo; it updates live as memories are saved.
 - **Hand edits are fine.** Parsing is tolerant: the `Now:` line, dates and the History section are all optional, and updates only replace the `Now:` line and append to History, leaving the rest of your text alone.
 - **Forget** moves the note to the vault's `.trash/<sender>/` folder (Obsidian's trash), so it disappears from Pocket and the graph but can be recovered by hand.
+- Photos are stored in `<sender>/attachments/` and embedded in their note with `![[...]]`. A short text sent within 5 seconds after a photo (and not a question) is used as its caption. On the Mac, `sips` converts HEIC photos to JPEG so Obsidian can show them.
 
 ## Development
 
@@ -157,6 +159,7 @@ pnpm typecheck   # tsc --noEmit
 | `src/vault.ts` | Obsidian notes: read, write, update, history, forget, tolerant parsing |
 | `src/voice.ts` | ElevenLabs Scribe and TTS, `afconvert` to m4a |
 | `src/shortcuts.ts` | Allowlisted Shortcut runner |
+| `src/photos.ts` | Photo memories (Claude vision) |
 | `src/config.ts` | Environment variables |
 
 Spectrum SDK reference: `.agents/skills/spectrum/` and the [Spectrum docs](https://photon.codes/docs/spectrum-ts).
