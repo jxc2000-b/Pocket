@@ -6,7 +6,7 @@ import { Brain } from "../src/brain.ts";
 import { BRAIN_FAILED, NOT_FOUND, Pocket, SAVE_FAILED, VAULT_UNREADABLE } from "../src/pocket.ts";
 import { ShortcutRunner, type ExecFileFn } from "../src/shortcuts.ts";
 import { Vault } from "../src/vault.ts";
-import { SENDER, TZ, decision, makeClock, mockClaude, tempDir } from "./helpers.ts";
+import { SENDER, TZ, decision, makeClock, mockLlm, tempDir } from "./helpers.ts";
 
 let root: string;
 let clock: ReturnType<typeof makeClock>;
@@ -18,7 +18,7 @@ const recordingExec: ExecFileFn = async (file, args) => {
   return { stdout: "", stderr: "" };
 };
 
-function makePocket(claude: ReturnType<typeof mockClaude>, allowlist = ["Pocket Calendar Event", "Pocket Bedtime"]) {
+function makePocket(claude: ReturnType<typeof mockLlm>, allowlist = ["Pocket Calendar Event", "Pocket Bedtime"]) {
   const vault = new Vault(root, TZ, clock.now);
   const runner = new ShortcutRunner(allowlist, recordingExec);
   return { vault, pocket: new Pocket(vault, new Brain(claude), runner, TZ, clock.now) };
@@ -32,7 +32,7 @@ beforeEach(async () => {
 
 describe("save / recall / update / history / forget / unknown", () => {
   it("runs the full memory lifecycle", async () => {
-    const claude = mockClaude(
+    const claude = mockLlm(
       decision({
         intent: "save",
         title: "Spare keys",
@@ -89,13 +89,13 @@ describe("save / recall / update / history / forget / unknown", () => {
     expect(out.reply).toBe(NOT_FOUND);
 
     // The memories handed to Claude are this sender's notes.
-    const recallPrompt = claude.calls[1]!.messages[0]!.content as string;
+    const recallPrompt = claude.calls[1]!.text;
     expect(recallPrompt).toContain('<note id="Spare keys"');
   });
 
   it("answers 'You haven't told me that yet.' when Claude cites a note that does not exist", async () => {
     const { pocket } = makePocket(
-      mockClaude(decision({ intent: "recall", found: true, answer: "A1234567", source_notes: ["Passport"] })),
+      mockLlm(decision({ intent: "recall", found: true, answer: "A1234567", source_notes: ["Passport"] })),
     );
     const out = await pocket.handleText(SENDER, "What's my passport number?");
     expect(out.reply).toBe(NOT_FOUND);
@@ -103,7 +103,7 @@ describe("save / recall / update / history / forget / unknown", () => {
 
   it("answers not-found when found=false even if an answer was produced", async () => {
     const { pocket, vault } = makePocket(
-      mockClaude(decision({ intent: "recall", found: false, answer: "Probably the drawer", source_notes: ["Spare keys"] })),
+      mockLlm(decision({ intent: "recall", found: false, answer: "Probably the drawer", source_notes: ["Spare keys"] })),
     );
     await vault.save(SENDER, { title: "Spare keys", now: "closet", original: "keys in closet" });
     const out = await pocket.handleText(SENDER, "Where's my passport?");
@@ -111,14 +111,14 @@ describe("save / recall / update / history / forget / unknown", () => {
   });
 
   it("keeps users' memories separate", async () => {
-    const claude = mockClaude(
+    const claude = mockLlm(
       decision({ intent: "save", title: "Spare keys", now: "closet" }),
       decision({ intent: "recall", found: false }),
     );
     const { pocket } = makePocket(claude);
     await pocket.handleText(SENDER, "keys in the closet");
     await pocket.handleText("bob@example.com", "where are my keys?");
-    expect(claude.calls[1]!.messages[0]!.content as string).toContain("(none saved yet)");
+    expect(claude.calls[1]!.text).toContain("(none saved yet)");
   });
 
   it("does not 👍 when the write fails", async () => {
@@ -128,7 +128,7 @@ describe("save / recall / update / history / forget / unknown", () => {
       }
     }
     const vault = new FailingVault(root, TZ, clock.now);
-    const claude = mockClaude(decision({ intent: "save", title: "Spare keys", now: "closet" }));
+    const claude = mockLlm(decision({ intent: "save", title: "Spare keys", now: "closet" }));
     const pocket = new Pocket(vault, new Brain(claude), new ShortcutRunner([], recordingExec), TZ, clock.now);
     const out = await pocket.handleText(SENDER, "keys in the closet");
     expect(out.react).toBeUndefined();
@@ -137,7 +137,7 @@ describe("save / recall / update / history / forget / unknown", () => {
 
   it("does not call Claude or 👍 when the vault cannot be read", async () => {
     await writeFile(join(root, SENDER), "not a folder");
-    const claude = mockClaude(decision({ intent: "save", title: "Spare keys", now: "closet" }));
+    const claude = mockLlm(decision({ intent: "save", title: "Spare keys", now: "closet" }));
     const { pocket } = makePocket(claude);
     const out = await pocket.handleText(SENDER, "keys in the closet");
     expect(out.react).toBeUndefined();
@@ -146,14 +146,14 @@ describe("save / recall / update / history / forget / unknown", () => {
   });
 
   it("says so plainly when Claude is unreachable", async () => {
-    const { pocket } = makePocket(mockClaude(new Error("boom")));
+    const { pocket } = makePocket(mockLlm(new Error("boom")));
     const out = await pocket.handleText(SENDER, "keys in the closet");
     expect(out.reply).toBe(BRAIN_FAILED);
     expect(out.react).toBeUndefined();
   });
 
   it("reacts ❓ when unclear", async () => {
-    const { pocket } = makePocket(mockClaude(decision({ intent: "unclear", answer: "What should I remember?" })));
+    const { pocket } = makePocket(mockLlm(decision({ intent: "unclear", answer: "What should I remember?" })));
     const out = await pocket.handleText(SENDER, "hmm");
     expect(out.react).toBe("❓");
     expect(out.reply).toBe("What should I remember?");
@@ -161,7 +161,7 @@ describe("save / recall / update / history / forget / unknown", () => {
 
   it("falls back to a new note when update targets an unknown note", async () => {
     const { pocket, vault } = makePocket(
-      mockClaude(decision({ intent: "update", target_note: "Nope", title: "Bike", now: "garage" })),
+      mockLlm(decision({ intent: "update", target_note: "Nope", title: "Bike", now: "garage" })),
     );
     const out = await pocket.handleText(SENDER, "bike is in the garage");
     expect(out.react).toBe("👍");
@@ -169,7 +169,7 @@ describe("save / recall / update / history / forget / unknown", () => {
   });
 
   it("reports when there is nothing to forget", async () => {
-    const { pocket } = makePocket(mockClaude(decision({ intent: "forget", target_note: "Nope" })));
+    const { pocket } = makePocket(mockLlm(decision({ intent: "forget", target_note: "Nope" })));
     const out = await pocket.handleText(SENDER, "forget my locker code");
     expect(out.react).toBeUndefined();
     expect(out.reply).toMatch(/couldn't find/);
@@ -179,7 +179,7 @@ describe("save / recall / update / history / forget / unknown", () => {
 describe("Shortcuts from messages", () => {
   it("saves the memory and creates a Calendar event", async () => {
     const { pocket, vault } = makePocket(
-      mockClaude(
+      mockLlm(
         decision({
           intent: "save",
           title: "Dentist",
@@ -207,7 +207,7 @@ describe("Shortcuts from messages", () => {
 
   it("confirms side-effect actions and saves nothing for action-only messages", async () => {
     const { pocket, vault } = makePocket(
-      mockClaude(
+      mockLlm(
         decision({
           intent: "action",
           actions: [{ action: "bedtime", title: "", start: "", end: "", notes: "", minutes: 0 }],
@@ -222,7 +222,7 @@ describe("Shortcuts from messages", () => {
 
   it("never runs a Shortcut that is not allowlisted, even if Claude asks", async () => {
     const { pocket } = makePocket(
-      mockClaude(
+      mockLlm(
         decision({
           intent: "action",
           actions: [{ action: "focus", title: "", start: "", end: "", notes: "", minutes: 120 }],

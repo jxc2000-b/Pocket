@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { Brain, MODEL, normalizeDecision, renderMemories } from "../src/brain.ts";
+import { Brain, normalizeDecision, renderMemories } from "../src/brain.ts";
 import { Vault } from "../src/vault.ts";
-import { SENDER, TZ, decision, makeClock, mockClaude, tempDir } from "./helpers.ts";
+import { SENDER, TZ, decision, makeClock, mockLlm, tempDir } from "./helpers.ts";
 
 describe("Brain.decide", () => {
-  it("sends the model, schema, current time and all of the sender's memories", async () => {
+  it("sends the schema, current time and all of the sender's memories", async () => {
     const vault = new Vault(await tempDir(), TZ, makeClock("2026-10-10T17:00:00Z").now);
     await vault.save(SENDER, { title: "Suitcase", now: "attic", original: "my suitcase is in the attic" });
-    const claude = mockClaude(decision({ intent: "recall", found: true, answer: "In the attic", source_notes: ["Suitcase"] }));
+    const claude = mockLlm(decision({ intent: "recall", found: true, answer: "In the attic", source_notes: ["Suitcase"] }));
     const brain = new Brain(claude);
 
     const d = await brain.decide({
@@ -20,36 +20,31 @@ describe("Brain.decide", () => {
 
     expect(d).toMatchObject({ intent: "recall", found: true, answer: "In the attic", source_notes: ["Suitcase"] });
     const params = claude.calls[0]!;
-    expect(params.model).toBe(MODEL);
-    expect(params.model).toBe("claude-opus-5-5");
-    expect(params.output_config?.format?.type).toBe("json_schema");
-    const content = params.messages[0]!.content as string;
+    expect(params.schema.required).toContain("intent");
+    const content = params.text;
     expect(content).toContain("Sunday, October 11, 2026");
     expect(content).toContain('<note id="Suitcase" last_saved="Oct 10, 2026">');
     expect(content).toContain("my suitcase is in the attic");
     expect(content).toContain("<message>\nWhere's the luggage?\n</message>");
-    const system = JSON.stringify(params.system);
+    const system = params.system ?? "";
     expect(system).toContain("calendar_event");
     expect(system).not.toContain("- bedtime:");
   });
 
   it("treats a refusal as unclear", async () => {
-    const brain = new Brain(async () => {
-      const { fakeResponse } = await import("./helpers.ts");
-      return fakeResponse("", "refusal");
-    });
+    const brain = new Brain(async () => ({ refused: true }));
     const d = await brain.decide({ message: "x", memories: [], now: new Date(), timeZone: TZ, enabledActions: [] });
     expect(d.intent).toBe("unclear");
   });
 
   it("treats malformed JSON as unclear", async () => {
-    const brain = new Brain(mockClaude("not json"));
+    const brain = new Brain(mockLlm("not json"));
     const d = await brain.decide({ message: "x", memories: [], now: new Date(), timeZone: TZ, enabledActions: [] });
     expect(d.intent).toBe("unclear");
   });
 
   it("propagates API errors to the caller", async () => {
-    const brain = new Brain(mockClaude(new Error("network down")));
+    const brain = new Brain(mockLlm(new Error("network down")));
     await expect(
       brain.decide({ message: "x", memories: [], now: new Date(), timeZone: TZ, enabledActions: [] }),
     ).rejects.toThrow("network down");

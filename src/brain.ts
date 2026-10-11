@@ -1,17 +1,12 @@
-// Claude: classify the message, extract fields, and answer recall questions
+// The model (Gemini or Claude, see llm.ts): classify the message, extract
+// fields, and answer recall questions
 // strictly from the sender's loaded memories. At prototype scale every
 // memory goes into the prompt; there is no semantic search.
 
-import Anthropic from "@anthropic-ai/sdk";
-import type {
-  BetaMessage,
-  MessageCreateParamsNonStreaming as BetaMessageCreateParamsNonStreaming,
-} from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { describeNow, formatNoteDate } from "./dates.ts";
 import { SHORTCUTS, isShortcutAction, type ShortcutAction, type ShortcutRequest } from "./shortcuts.ts";
+import type { GenerateJson } from "./llm.ts";
 import type { Memory } from "./vault.ts";
-
-export const MODEL = "claude-opus-5-5";
 
 export const INTENTS = ["save", "update", "recall", "history", "forget", "action", "chat", "unclear"] as const;
 export type Intent = (typeof INTENTS)[number];
@@ -34,9 +29,6 @@ export interface Decision {
   source_notes: string[];
   actions: ShortcutRequest[];
 }
-
-/** The one SDK call Brain needs; injectable so tests can mock Claude. */
-export type CreateMessage = (params: BetaMessageCreateParamsNonStreaming) => Promise<BetaMessage>;
 
 export interface DecideInput {
   message: string;
@@ -174,73 +166,21 @@ export function normalizeDecision(value: unknown, enabledActions: ShortcutAction
   };
 }
 
-export function extractJson(message: BetaMessage): unknown {
-  const text = message.content
-    .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
-    .map((b) => b.text)
-    .join("")
-    .trim();
-  if (!text) return undefined;
-  try {
-    return JSON.parse(text);
-  } catch {
-    const start = text.indexOf("{");
-    const end = text.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      try {
-        return JSON.parse(text.slice(start, end + 1));
-      } catch {
-        return undefined;
-      }
-    }
-    return undefined;
-  }
-}
-
 export class Brain {
-  private readonly create: CreateMessage;
-
-  constructor(create?: CreateMessage) {
-    if (create) {
-      this.create = create;
-    } else {
-      const client = new Anthropic();
-      this.create = (params) => client.beta.messages.create(params);
-    }
-  }
+  constructor(private readonly generate: GenerateJson) {}
 
   async decide(input: DecideInput): Promise<Decision> {
-    const params: BetaMessageCreateParamsNonStreaming = {
-      model: MODEL,
-      max_tokens: 16000,
-      // Server-side fallback: if a safety classifier declines, the API retries
-      // on its default fallback model inside the same call.
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      system: [
-        { type: "text", text: buildSystemPrompt(input.enabledActions), cache_control: { type: "ephemeral" } },
-      ],
-      output_config: {
-        effort: "medium",
-        format: { type: "json_schema", schema: decisionSchema(input.enabledActions) },
-      },
-      messages: [
-        {
-          role: "user",
-          content: `Current time: ${describeNow(input.now, input.timeZone)}\n\n${renderMemories(
-            input.memories,
-            input.timeZone,
-          )}\n\n<message>\n${input.message}\n</message>`,
-        },
-      ],
-    };
-    const response = await this.create(params);
-    if (response.stop_reason === "refusal") return { ...UNCLEAR };
-    return normalizeDecision(extractJson(response), input.enabledActions);
-  }
-
-  /** Lower-level access for other Claude calls (photo description). */
-  get createMessage(): CreateMessage {
-    return this.create;
+    const result = await this.generate({
+      system: buildSystemPrompt(input.enabledActions),
+      text: `Current time: ${describeNow(input.now, input.timeZone)}\n\n${renderMemories(
+        input.memories,
+        input.timeZone,
+      )}\n\n<message>\n${input.message}\n</message>`,
+      schema: decisionSchema(input.enabledActions),
+      effort: "medium",
+      maxTokens: 16000,
+    });
+    if (result.refused) return { ...UNCLEAR };
+    return normalizeDecision(result.value, input.enabledActions);
   }
 }

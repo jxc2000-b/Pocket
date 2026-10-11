@@ -1,4 +1,4 @@
-// Core behavior, independent of Spectrum: route a message through Claude,
+// Core behavior, independent of Spectrum: route a message through the model,
 // apply it to the vault, run any allowlisted Shortcut, and describe what the
 // transport should do (tapback, reply, extra messages, attachments).
 //
@@ -119,7 +119,7 @@ export class Pocket {
         enabledActions: this.shortcuts.enabledActions(),
       });
     } catch (err) {
-      console.error("[pocket] Claude call failed:", err);
+      console.error("[pocket] model call failed:", err);
       out.reply = BRAIN_FAILED;
       return out;
     }

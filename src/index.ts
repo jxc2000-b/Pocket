@@ -7,6 +7,7 @@ import { Spectrum, attachment, voice, type ContentInput, type Message, type Spac
 import { effect, imessage } from "spectrum-ts/providers/imessage";
 import { Brain } from "./brain.ts";
 import { loadConfig } from "./config.ts";
+import { claudeGenerateJson, geminiGenerateJson } from "./llm.ts";
 import { Photos, isImageMime } from "./photos.ts";
 import { Pocket, type Outcome } from "./pocket.ts";
 import { ShortcutRunner } from "./shortcuts.ts";
@@ -23,8 +24,12 @@ try {
 const config = loadConfig();
 const vault = new Vault(config.vaultPath, config.timeZone);
 const shortcuts = new ShortcutRunner(config.shortcutAllowlist);
-const brain = new Brain();
-const pocket = new Pocket(vault, brain, shortcuts, config.timeZone, undefined, new Photos(brain.createMessage));
+const generate =
+  config.llm.provider === "gemini"
+    ? geminiGenerateJson(config.llm.apiKey, config.llm.model)
+    : claudeGenerateJson(config.llm.model);
+const brain = new Brain(generate);
+const pocket = new Pocket(vault, brain, shortcuts, config.timeZone, undefined, new Photos(generate));
 const speech = new Voice(config.elevenLabs);
 
 const app = await Spectrum({
@@ -33,7 +38,7 @@ const app = await Spectrum({
   providers: [imessage.config()],
 });
 
-console.log(`[pocket] running. Vault: ${config.vaultPath}`);
+console.log(`[pocket] running on ${config.llm.provider} (${config.llm.model}). Vault: ${config.vaultPath}`);
 if (!speech.enabled) console.warn("[pocket] ELEVENLABS_API_KEY not set: voice notes are disabled.");
 console.log(`[pocket] Shortcuts enabled: ${shortcuts.enabledActions().join(", ") || "none"}`);
 

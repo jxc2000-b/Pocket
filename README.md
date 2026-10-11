@@ -18,11 +18,11 @@ The full product spec is in [`POCKET_MEMORY.md`](./POCKET_MEMORY.md).
 
 ## How it runs
 
-Photon's Spectrum Cloud hosts the iMessage line. The agent process (`pnpm start`) runs **on your Mac**, which provides the Obsidian vault on disk and the macOS `shortcuts` command. Claude (`claude-opus-5-5`, via `@anthropic-ai/sdk`) routes each message and answers questions strictly from your saved notes; ElevenLabs handles all speech.
+Photon's Spectrum Cloud hosts the iMessage line. The agent process (`pnpm start`) runs **on your Mac**, which provides the Obsidian vault on disk and the macOS `shortcuts` command. Gemini (`gemini-flash-latest` by default, via `@google/genai`) routes each message and answers questions strictly from your saved notes; ElevenLabs handles all speech.
 
 ```
 iPhone ──iMessage──▶ Spectrum Cloud ──▶ pnpm start (your Mac)
-                                          ├─ Claude: classify, extract, answer from notes
+                                          ├─ Gemini: classify, extract, answer from notes
                                           ├─ Obsidian vault: <vault>/<sender>/<Thing>.md
                                           ├─ ElevenLabs: Scribe STT / TTS (+ afconvert → m4a)
                                           └─ shortcuts run "<allowlisted name>"
@@ -33,7 +33,7 @@ iPhone ──iMessage──▶ Spectrum Cloud ──▶ pnpm start (your Mac)
 - A Mac with macOS 12 or later (for the `shortcuts` command and `afconvert`), Node.js 22+, and pnpm
 - [Obsidian](https://obsidian.md) with a vault folder
 - A Spectrum Cloud project from the [Photon dashboard](https://app.photon.codes) (Pro plan: one-on-one chats only)
-- An [Anthropic API key](https://console.anthropic.com)
+- A [Gemini API key](https://aistudio.google.com/apikey) (or an [Anthropic API key](https://console.anthropic.com) to use Claude instead)
 - An [ElevenLabs API key](https://elevenlabs.io) (for voice notes)
 
 ## Setup
@@ -50,7 +50,10 @@ iPhone ──iMessage──▶ Spectrum Cloud ──▶ pnpm start (your Mac)
    |---|---|---|
    | `PROJECT_ID` | yes | Spectrum project id (Photon dashboard → project Settings) |
    | `PROJECT_SECRET` | yes | Spectrum project secret (Photon dashboard → project Settings) |
-   | `ANTHROPIC_API_KEY` | yes | Claude API key |
+   | `GEMINI_API_KEY` | yes* | Gemini API key |
+   | `GEMINI_MODEL` | no | Gemini model id (default `gemini-flash-latest`) |
+   | `ANTHROPIC_API_KEY` | no* | Claude API key, to use Claude (`claude-opus-5-5`) instead of Gemini |
+   | `POCKET_LLM` | no | Force `gemini` or `claude`. Unset: Gemini if `GEMINI_API_KEY` is set, else Claude |
    | `POCKET_VAULT_PATH` | yes | Absolute path to your Obsidian vault folder (`~/` is allowed) |
    | `ELEVENLABS_API_KEY` | for voice | ElevenLabs API key. Without it, voice notes get a "text me instead" reply |
    | `ELEVENLABS_VOICE_ID` | no | Pocket's voice. Empty uses a default premade voice. Pick one in the ElevenLabs Voice Library and paste its id |
@@ -58,6 +61,8 @@ iPhone ──iMessage──▶ Spectrum Cloud ──▶ pnpm start (your Mac)
    | `ELEVENLABS_TTS_MODEL` | no | Text-to-speech model, default `eleven_multilingual_v2` |
    | `POCKET_SHORTCUTS_ALLOWLIST` | no | Comma-separated exact Shortcut names Pocket may run. Empty = all five names below. `none` disables Shortcuts |
    | `POCKET_TIMEZONE` | no | IANA time zone such as `America/Los_Angeles`, used for "Tuesday at 3pm" and dates. Defaults to the Mac's zone |
+
+   \* Set one of `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`.
 
    If startup fails with an authentication error, verify `PROJECT_ID` / `PROJECT_SECRET` in the Photon dashboard.
 
@@ -147,7 +152,7 @@ Each sender gets a folder (named after their phone number or email). Each thing,
 ## Development
 
 ```sh
-pnpm test        # unit tests (vitest): vault, parsing, routing with Claude mocked, voice, Shortcuts allowlist
+pnpm test        # unit tests (vitest): vault, parsing, routing with the model mocked, voice, Shortcuts allowlist
 pnpm typecheck   # tsc --noEmit
 ```
 
@@ -155,11 +160,12 @@ pnpm typecheck   # tsc --noEmit
 |---|---|
 | `src/index.ts` | Spectrum loop: outbound filtering, one-on-one only, per-sender queue, typing indicator, tapbacks, replies, voice |
 | `src/pocket.ts` | Routing and reliability rules (write before 👍, no unsupported answers) |
-| `src/brain.ts` | Claude call: intent, fields, and recall answered only from the loaded notes |
+| `src/llm.ts` | The JSON model call, for Gemini and Claude |
+| `src/brain.ts` | Model call: intent, fields, and recall answered only from the loaded notes |
 | `src/vault.ts` | Obsidian notes: read, write, update, history, forget, tolerant parsing |
 | `src/voice.ts` | ElevenLabs Scribe and TTS, `afconvert` to m4a |
 | `src/shortcuts.ts` | Allowlisted Shortcut runner |
-| `src/photos.ts` | Photo memories (Claude vision) |
+| `src/photos.ts` | Photo memories (model vision) |
 | `src/config.ts` | Environment variables |
 
 Spectrum SDK reference: `.agents/skills/spectrum/` and the [Spectrum docs](https://photon.codes/docs/spectrum-ts).

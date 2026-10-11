@@ -8,7 +8,7 @@ import { Photos, PhotoError, isImageMime } from "../src/photos.ts";
 import { Pocket } from "../src/pocket.ts";
 import { ShortcutRunner } from "../src/shortcuts.ts";
 import { Vault } from "../src/vault.ts";
-import { SENDER, TZ, decision, makeClock, mockClaude, tempDir } from "./helpers.ts";
+import { SENDER, TZ, decision, makeClock, mockLlm, tempDir } from "./helpers.ts";
 
 let root: string;
 let clock: ReturnType<typeof makeClock>;
@@ -20,7 +20,7 @@ beforeEach(async () => {
 
 describe("Photos.prepare", () => {
   it("uses supported images as-is off macOS and rejects others", async () => {
-    const p = new Photos(mockClaude(), undefined, "linux");
+    const p = new Photos(mockLlm(), undefined, "linux");
     const img = await p.prepare(Buffer.from("png"), "image/png");
     expect(img).toMatchObject({ storedExt: "png", visionType: "image/png" });
     await expect(p.prepare(Buffer.from("heic"), "image/heic")).rejects.toBeInstanceOf(PhotoError);
@@ -34,7 +34,7 @@ describe("Photos.prepare", () => {
       await writeFile(args[args.length - 1]!, args.includes("-Z") ? "small-jpeg" : "full-jpeg");
       return { stdout: "", stderr: "" };
     };
-    const img = await new Photos(mockClaude(), exec, "darwin").prepare(Buffer.from("heic"), "image/heic");
+    const img = await new Photos(mockLlm(), exec, "darwin").prepare(Buffer.from("heic"), "image/heic");
     expect(calls.every((c) => c[0] === "sips")).toBe(true);
     expect(img.storedExt).toBe("jpg");
     expect(img.stored.toString()).toBe("full-jpeg");
@@ -48,9 +48,9 @@ describe("Photos.prepare", () => {
   });
 });
 
-describe("photo memories end to end (Claude mocked)", () => {
+describe("photo memories end to end (model mocked)", () => {
   it("saves the image in the vault, embeds it, 👍, and sends it back on recall", async () => {
-    const claude = mockClaude(
+    const claude = mockLlm(
       { title: "Bin 3", now: "camping stuff: tent, sleeping bags, lantern", entities: [] },
       decision({ intent: "recall", found: true, answer: "Bin 3", source_notes: ["Bin 3"] }),
     );
@@ -69,9 +69,9 @@ describe("photo memories end to end (Claude mocked)", () => {
     expect(note).toContain('"camping stuff (photo)"');
 
     // The vision request carried the image and caption.
-    const visionContent = claude.calls[0]!.messages[0]!.content as Array<{ type: string; text?: string }>;
-    expect(visionContent[0]!.type).toBe("image");
-    expect(visionContent[1]!.text).toContain('"camping stuff"');
+    const vision = claude.calls[0]!;
+    expect(vision.image).toEqual({ data: Buffer.from("jpeg-bytes"), mimeType: "image/jpeg" });
+    expect(vision.text).toContain('"camping stuff"');
 
     const recall = await pocket.handleText(SENDER, "Which bin has my tent?");
     expect(recall.reply).toBe("Bin 3. You saved that on Oct 10.");
@@ -79,7 +79,7 @@ describe("photo memories end to end (Claude mocked)", () => {
   });
 
   it("does not 👍 when the photo cannot be read", async () => {
-    const claude = mockClaude();
+    const claude = mockLlm();
     const pocket = new Pocket(
       new Vault(root, TZ, clock.now),
       new Brain(claude),
