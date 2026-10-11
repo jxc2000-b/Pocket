@@ -19,6 +19,7 @@ describe("loadLlm", () => {
       model: DEFAULT_GEMINI_MODEL,
       fallbackModel: DEFAULT_GEMINI_FALLBACK_MODEL,
     });
+    expect(DEFAULT_GEMINI_MODEL).toBe("gemini-flash-lite-latest");
     expect(loadLlm({ GEMINI_API_KEY: "g", GEMINI_MODEL: "gemini-x", ANTHROPIC_API_KEY: "a" })).toMatchObject({
       provider: "gemini",
       model: "gemini-x",
@@ -157,6 +158,32 @@ describe("geminiGenerateJson retries", () => {
       expect(await generate({ ...req, effort: "medium" })).toEqual({ refused: false, value: { a: 1 } });
       expect(await generate(req)).toEqual({ refused: false, value: { a: 1 } });
       expect(bodies.map((b) => Boolean(b.generationConfig.thinkingConfig))).toEqual([true, false, false]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("abandons a hung call after the timeout and moves to the next model", async () => {
+    const { geminiGenerateJson } = await import("../src/llm.ts");
+    const { vi } = await import("vitest");
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", (url: string | URL | Request, init?: RequestInit) => {
+      urls.push(String(url));
+      if (String(url).includes("models/slow:")) {
+        // Never answers; only the abort signal ends it.
+        return new Promise((_resolve, reject) =>
+          init?.signal?.addEventListener("abort", () => reject(init.signal!.reason ?? new DOMException("aborted", "AbortError"))),
+        );
+      }
+      return Promise.resolve(ok());
+    });
+    try {
+      const generate = geminiGenerateJson("k", ["slow", "fast"], { attempts: 3, timeoutMs: 50, sleep: async () => {} });
+      const started = Date.now();
+      expect(await generate(req)).toEqual({ refused: false, value: { a: 1 } });
+      expect(Date.now() - started).toBeLessThan(2000);
+      expect(urls.filter((u) => u.includes("models/slow:"))).toHaveLength(1);
+      expect(urls.at(-1)).toContain("models/fast:");
     } finally {
       vi.unstubAllGlobals();
     }

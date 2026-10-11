@@ -111,7 +111,7 @@ Return JSON:
         },
       },
       effort: "low",
-      maxTokens: 4000,
+      maxTokens: 2048,
     });
     if (result.refused) throw new PhotoError("The model declined to describe the photo");
     const json = result.value as Partial<PhotoDescription> | undefined;

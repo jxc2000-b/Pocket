@@ -51,9 +51,10 @@ export function parseShortcutAllowlist(raw: string | undefined): string[] {
     .filter((s) => s.length > 0);
 }
 
-export const DEFAULT_GEMINI_MODEL = "gemini-flash-latest";
-/** Tried when the main Gemini model stays overloaded. */
-export const DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-flash-lite-latest";
+/** Flash-Lite: the cheapest, lowest-latency Gemini tier, enough for routing. */
+export const DEFAULT_GEMINI_MODEL = "gemini-flash-lite-latest";
+/** Tried when the main Gemini model is overloaded or too slow. */
+export const DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-flash-latest";
 export const DEFAULT_CLAUDE_MODEL = "claude-opus-5-5";
 
 /**

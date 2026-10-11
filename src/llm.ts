@@ -64,18 +64,31 @@ export interface RetryOptions {
   /** Delay before the first retry; doubles each time. */
   baseDelayMs: number;
   sleep: (ms: number) => Promise<void>;
+  /** A call taking longer than this is abandoned and the next model is tried. */
+  timeoutMs: number;
 }
 
 const DEFAULT_RETRY: RetryOptions = {
   attempts: 3,
   baseDelayMs: 1000,
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+  timeoutMs: 20_000,
 };
+
+function isTimeout(err: unknown): boolean {
+  const e = err as { name?: unknown; message?: unknown } | null;
+  return (
+    e?.name === "AbortError" ||
+    e?.name === "TimeoutError" ||
+    (typeof e?.message === "string" && /aborted|timed out|timeout/i.test(e.message))
+  );
+}
 
 /**
  * Gemini with retries: each model gets a few attempts with exponential
  * backoff on overload/rate-limit errors, then the next model in `models` is
- * tried. Other errors (bad key, bad request) fail immediately.
+ * tried. A call slower than `timeoutMs` moves straight to the next model.
+ * Other errors (bad key, bad request) fail immediately.
  */
 export function geminiGenerateJson(
   apiKey: string,
@@ -93,7 +106,7 @@ export function geminiGenerateJson(
       for (let attempt = 0; attempt < opts.attempts; attempt++) {
         try {
           const started = Date.now();
-          const result = await once(model, req, !noThinking.has(model));
+          const result = await once(model, req, !noThinking.has(model), opts.timeoutMs);
           console.log(`[pocket] ${model} answered in ${((Date.now() - started) / 1000).toFixed(1)}s`);
           return result;
         } catch (err) {
@@ -102,6 +115,11 @@ export function geminiGenerateJson(
             noThinking.add(model);
             attempt--;
             continue;
+          }
+          if (isTimeout(err)) {
+            console.warn(`[pocket] ${model} took over ${opts.timeoutMs / 1000}s; giving up on it for this message`);
+            lastErr = err;
+            break;
           }
           if (!isRetryable(err)) throw err;
           lastErr = err;
@@ -130,8 +148,10 @@ function isThinkingRejected(err: unknown): boolean {
   return e?.status === 400 && typeof e.message === "string" && /thinking/i.test(e.message);
 }
 
-function geminiOnce(ai: GoogleGenAI): (model: string, req: JsonRequest, thinking: boolean) => Promise<JsonResult> {
-  return async (model, req, thinking) => {
+function geminiOnce(
+  ai: GoogleGenAI,
+): (model: string, req: JsonRequest, thinking: boolean, timeoutMs: number) => Promise<JsonResult> {
+  return async (model, req, thinking, timeoutMs) => {
     const parts: Array<Record<string, unknown>> = [];
     if (req.image) parts.push({ inlineData: { mimeType: req.image.mimeType, data: req.image.data.toString("base64") } });
     parts.push({ text: req.text });
@@ -139,6 +159,7 @@ function geminiOnce(ai: GoogleGenAI): (model: string, req: JsonRequest, thinking
       model,
       contents: [{ role: "user", parts }],
       config: {
+        abortSignal: AbortSignal.timeout(timeoutMs),
         ...(req.system ? { systemInstruction: req.system } : {}),
         responseMimeType: "application/json",
         responseJsonSchema: req.schema,

@@ -178,7 +178,7 @@ export class Brain {
       )}\n\n<message>\n${input.message}\n</message>`,
       schema: decisionSchema(input.enabledActions),
       effort: "medium",
-      maxTokens: 16000,
+      maxTokens: 4096,
     });
     if (result.refused) return { ...UNCLEAR };
     return normalizeDecision(result.value, input.enabledActions);

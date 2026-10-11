@@ -18,7 +18,7 @@ The full product spec is in [`POCKET_MEMORY.md`](./POCKET_MEMORY.md).
 
 ## How it runs
 
-Photon's Spectrum Cloud hosts the iMessage line. The agent process (`pnpm start`) runs **on your Mac**, which provides the Obsidian vault on disk and the macOS `shortcuts` command. Gemini (`gemini-flash-latest` by default, via `@google/genai`) routes each message and answers questions strictly from your saved notes; ElevenLabs handles all speech.
+Photon's Spectrum Cloud hosts the iMessage line. The agent process (`pnpm start`) runs **on your Mac**, which provides the Obsidian vault on disk and the macOS `shortcuts` command. Gemini (`gemini-flash-lite-latest` by default, via `@google/genai`) routes each message and answers questions strictly from your saved notes; ElevenLabs handles all speech.
 
 ```
 iPhone ──iMessage──▶ Spectrum Cloud ──▶ pnpm start (your Mac)
@@ -51,8 +51,8 @@ iPhone ──iMessage──▶ Spectrum Cloud ──▶ pnpm start (your Mac)
    | `PROJECT_ID` | yes | Spectrum project id (Photon dashboard → project Settings) |
    | `PROJECT_SECRET` | yes | Spectrum project secret (Photon dashboard → project Settings) |
    | `GEMINI_API_KEY` | yes* | Gemini API key |
-   | `GEMINI_MODEL` | no | Gemini model id (default `gemini-flash-latest`) |
-   | `GEMINI_FALLBACK_MODEL` | no | Used when the main model is still overloaded after 3 tries (default `gemini-flash-lite-latest`) |
+   | `GEMINI_MODEL` | no | Gemini model id (default `gemini-flash-lite-latest`) |
+   | `GEMINI_FALLBACK_MODEL` | no | Used when the main model is still overloaded after 3 tries or takes over 20s (default `gemini-flash-latest`) |
    | `ANTHROPIC_API_KEY` | no* | Claude API key, to use Claude (`claude-opus-5-5`) instead of Gemini |
    | `POCKET_LLM` | no | Force `gemini` or `claude`. Unset: Gemini if `GEMINI_API_KEY` is set, else Claude |
    | `POCKET_VAULT_PATH` | yes | Absolute path to your Obsidian vault folder (`~/` is allowed) |
