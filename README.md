@@ -52,6 +52,7 @@ iPhone ──iMessage──▶ Spectrum Cloud ──▶ pnpm start (your Mac)
    | `PROJECT_SECRET` | yes | Spectrum project secret (Photon dashboard → project Settings) |
    | `GEMINI_API_KEY` | yes* | Gemini API key |
    | `GEMINI_MODEL` | no | Gemini model id (default `gemini-flash-latest`) |
+   | `GEMINI_FALLBACK_MODEL` | no | Used when the main model is still overloaded after 3 tries (default `gemini-flash-lite-latest`) |
    | `ANTHROPIC_API_KEY` | no* | Claude API key, to use Claude (`claude-opus-5-5`) instead of Gemini |
    | `POCKET_LLM` | no | Force `gemini` or `claude`. Unset: Gemini if `GEMINI_API_KEY` is set, else Claude |
    | `POCKET_VAULT_PATH` | yes | Absolute path to your Obsidian vault folder (`~/` is allowed) |

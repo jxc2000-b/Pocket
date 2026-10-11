@@ -26,7 +26,7 @@ const vault = new Vault(config.vaultPath, config.timeZone);
 const shortcuts = new ShortcutRunner(config.shortcutAllowlist);
 const generate =
   config.llm.provider === "gemini"
-    ? geminiGenerateJson(config.llm.apiKey, config.llm.model)
+    ? geminiGenerateJson(config.llm.apiKey, [config.llm.model, config.llm.fallbackModel])
     : claudeGenerateJson(config.llm.model);
 const brain = new Brain(generate);
 const pocket = new Pocket(vault, brain, shortcuts, config.timeZone, undefined, new Photos(generate));

@@ -50,9 +50,62 @@ const GEMINI_BLOCKED: readonly string[] = [
   FinishReason.RECITATION,
 ];
 
-export function geminiGenerateJson(apiKey: string, model: string): GenerateJson {
-  const ai = new GoogleGenAI({ apiKey });
+/** Gemini statuses worth retrying: rate limited, overloaded, or a server hiccup. */
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+
+function isRetryable(err: unknown): boolean {
+  const status = (err as { status?: unknown } | null)?.status;
+  return typeof status === "number" && RETRYABLE_STATUS.has(status);
+}
+
+export interface RetryOptions {
+  /** Attempts per model before moving to the next one. */
+  attempts: number;
+  /** Delay before the first retry; doubles each time. */
+  baseDelayMs: number;
+  sleep: (ms: number) => Promise<void>;
+}
+
+const DEFAULT_RETRY: RetryOptions = {
+  attempts: 3,
+  baseDelayMs: 1000,
+  sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+};
+
+/**
+ * Gemini with retries: each model gets a few attempts with exponential
+ * backoff on overload/rate-limit errors, then the next model in `models` is
+ * tried. Other errors (bad key, bad request) fail immediately.
+ */
+export function geminiGenerateJson(
+  apiKey: string,
+  models: string | string[],
+  retry: Partial<RetryOptions> = {},
+): GenerateJson {
+  const opts = { ...DEFAULT_RETRY, ...retry };
+  const chain = (Array.isArray(models) ? models : [models]).filter((m, i, all) => m && all.indexOf(m) === i);
+  const once = geminiOnce(new GoogleGenAI({ apiKey }));
   return async (req) => {
+    let lastErr: unknown;
+    for (const model of chain) {
+      for (let attempt = 0; attempt < opts.attempts; attempt++) {
+        try {
+          return await once(model, req);
+        } catch (err) {
+          if (!isRetryable(err)) throw err;
+          lastErr = err;
+          const status = (err as { status: number }).status;
+          console.warn(`[pocket] ${model} returned ${status} (attempt ${attempt + 1}/${opts.attempts})`);
+          if (attempt + 1 < opts.attempts) await opts.sleep(opts.baseDelayMs * 2 ** attempt);
+        }
+      }
+    }
+    throw lastErr;
+  };
+}
+
+function geminiOnce(ai: GoogleGenAI): (model: string, req: JsonRequest) => Promise<JsonResult> {
+  return async (model, req) => {
     const parts: Array<Record<string, unknown>> = [];
     if (req.image) parts.push({ inlineData: { mimeType: req.image.mimeType, data: req.image.data.toString("base64") } });
     parts.push({ text: req.text });
