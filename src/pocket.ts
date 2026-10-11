@@ -201,6 +201,10 @@ export class Pocket {
         return out;
       }
 
+      case "general":
+        out.reply = d.answer || "I'm not sure about that one.";
+        return out;
+
       case "chat":
         out.reply = d.answer || "I'm Pocket. Text me anything you want to remember, then ask me later.";
         return out;

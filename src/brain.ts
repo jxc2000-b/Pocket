@@ -8,7 +8,7 @@ import { SHORTCUTS, isShortcutAction, type ShortcutAction, type ShortcutRequest 
 import type { GenerateJson } from "./llm.ts";
 import type { Memory } from "./vault.ts";
 
-export const INTENTS = ["save", "update", "recall", "history", "forget", "action", "chat", "unclear"] as const;
+export const INTENTS = ["save", "update", "recall", "history", "forget", "action", "general", "chat", "unclear"] as const;
 export type Intent = (typeof INTENTS)[number];
 
 export interface Decision {
@@ -65,13 +65,14 @@ Choose exactly one intent:
 - history: a question about past values ("Where did the keys used to be?"). Answer from History entries and include their dates.
 - forget: the user asks you to forget/delete a memory. Set target_note to that note's exact id.
 - action: a command for one of the actions below with nothing worth remembering ("I'm heading to bed").
+- general: a general-knowledge or trivia question that is not about the user's own life ("What's the capital of Australia?", "How many ounces in a cup?", "Who wrote Piranesi?"). Answer from general knowledge in one or two short sentences. If you are not sure, say so rather than guess. Never use this for questions about the user's own things, people, plans or past (where their keys are, their friend's birthday, their passport number): those are recall or history, answered only from their memories.
 - chat: greetings, thanks, or questions about what you can do. Reply in one short sentence. Never state facts about the user here.
 - unclear: you cannot tell what they want. Put a short clarifying question in answer.
 
 Field rules:
 - now: the concise current value, in the user's terms ("kitchen drawer", "16x20x1", "tiramisu", "early flight, to make dinner"). For save/update only.
 - entities: people and named entities mentioned (e.g. "Jamie", "Sam", "Piranesi"), for linking. Do not include the note's own title. Keep names as written.
-- found / answer / source_notes: for recall and history only. Answer ONLY from the memories given. If the memories do not contain the answer, set found=false, answer="" and source_notes=[]. Never guess, never use general knowledge, never invent. For recall, answer in a few words with no date (the app appends when it was saved), e.g. "Green bag in the hall closet." For history, include the dates from the note. source_notes lists the exact ids you used.
+- found / answer / source_notes: for recall and history, answer ONLY from the memories given. If the memories do not contain the answer, set found=false, answer="" and source_notes=[]. Never guess, never use general knowledge, never invent. For general, put the reply in answer and leave found=false, source_notes=[]. For recall, answer in a few words with no date (the app appends when it was saved), e.g. "Green bag in the hall closet." For history, include the dates from the note. source_notes lists the exact ids you used.
 - Leave fields that do not apply as "" / [] / false.
 - Keep every reply short: this is a text message.
 
